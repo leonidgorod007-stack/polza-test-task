@@ -102,10 +102,15 @@ function Start-PortablePostgres {
     & (Join-Path $bin 'initdb.exe') -D $data -U postgres -A scram-sha-256 --pwfile=$pw -E UTF8 --locale=C | Out-Null
     Remove-Item $pw -Force
   }
+  $conf = Join-Path $data 'postgresql.conf'
+  if ((Test-Path $conf) -and -not (Select-String -Path $conf -Pattern "^port = $PgPort\b" -Quiet)) {
+    Add-Content -Path $conf -Value "port = $PgPort"
+  }
   $status = & (Join-Path $bin 'pg_ctl.exe') -D $data status 2>&1
   if ($status -notmatch 'server is running') {
     Say "Starting PostgreSQL on port $PgPort"
-    & (Join-Path $bin 'pg_ctl.exe') -D $data -l (Join-Path $pgHome 'pg.log') -o "-p $PgPort" -w start | Out-Null
+    $log = Join-Path $pgHome 'pg.log'
+    Start-Process -FilePath (Join-Path $bin 'pg_ctl.exe') -ArgumentList '-D', "`"$data`"", '-l', "`"$log`"", 'start' -WindowStyle Hidden
   }
   return "postgresql://postgres:postgres@localhost:$PgPort/$DbName"
 }
