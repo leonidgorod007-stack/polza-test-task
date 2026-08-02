@@ -15,6 +15,8 @@ function Say($m)  { Write-Host "==> $m" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "OK  $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "!!  $m" -ForegroundColor Yellow }
 
+function Test-Ascii($s) { foreach ($c in $s.ToCharArray()) { if ([int][char]$c -gt 127) { return $false } }; return $true }
+
 function Ensure-Node {
   if (Get-Command node -ErrorAction SilentlyContinue) { Ok "Node found: $(node --version)"; return }
   $existing = Get-ChildItem (Join-Path $Tools 'node') -Filter node.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -49,16 +51,44 @@ function Test-DbUrl($url) {
   return ($LASTEXITCODE -eq 0)
 }
 
+function Get-PgHome {
+  if ((Test-Ascii $Tools) -and ($Repo -notmatch 'OneDrive')) { return $Tools }
+  Warn "Repo path is non-ASCII or under OneDrive - PostgreSQL cannot init there; using an ASCII-safe location"
+  $candidates = @(
+    (Join-Path $env:PUBLIC 'polza-test-task'),
+    (Join-Path $env:ProgramData 'polza-test-task'),
+    'C:\polza-test-task'
+  )
+  foreach ($c in $candidates) {
+    if (-not (Test-Ascii $c)) { continue }
+    try {
+      New-Item -ItemType Directory -Force $c -ErrorAction Stop | Out-Null
+      $t = Join-Path $c '.wtest'; Set-Content -Path $t -Value 'x' -ErrorAction Stop; Remove-Item $t -Force
+      Ok "PostgreSQL location: $c"
+      return $c
+    } catch { }
+  }
+  return $Tools
+}
+
 function Start-PortablePostgres {
-  $bin  = Join-Path $Tools 'pgsql\bin'
-  $data = Join-Path $Tools 'pgdata'
+  $pgHome = Get-PgHome
+  $bin  = Join-Path $pgHome 'pgsql\bin'
+  $data = Join-Path $pgHome 'pgdata'
   if (-not (Test-Path (Join-Path $bin 'postgres.exe'))) {
-    Say "Downloading portable PostgreSQL (~320 MB, one time)"
-    New-Item -ItemType Directory -Force $Tools | Out-Null
-    $zip = Join-Path $Tools 'pg.zip'
-    Invoke-WebRequest -Uri 'https://get.enterprisedb.com/postgresql/postgresql-17.5-1-windows-x64-binaries.zip' -OutFile $zip -TimeoutSec 1800 -ErrorAction Stop
-    Expand-Archive -Path $zip -DestinationPath $Tools -Force -ErrorAction Stop
-    Remove-Item $zip -Force
+    $already = Join-Path $Tools 'pgsql\bin\postgres.exe'
+    if ((Test-Path $already) -and ($pgHome -ne $Tools)) {
+      try { Say "Moving already-downloaded PostgreSQL to ASCII-safe location"; Move-Item (Join-Path $Tools 'pgsql') (Join-Path $pgHome 'pgsql') -Force -ErrorAction Stop }
+      catch { Warn "Move failed - will re-download" }
+    }
+    if (-not (Test-Path (Join-Path $bin 'postgres.exe'))) {
+      Say "Downloading portable PostgreSQL (~320 MB, one time)"
+      New-Item -ItemType Directory -Force $pgHome | Out-Null
+      $zip = Join-Path $pgHome 'pg.zip'
+      Invoke-WebRequest -Uri 'https://get.enterprisedb.com/postgresql/postgresql-17.5-1-windows-x64-binaries.zip' -OutFile $zip -TimeoutSec 1800 -ErrorAction Stop
+      Expand-Archive -Path $zip -DestinationPath $pgHome -Force -ErrorAction Stop
+      Remove-Item $zip -Force
+    }
   }
   $vc = Join-Path $bin 'vcruntime140_1.dll'
   if (-not (Test-Path $vc) -and -not (Test-Path 'C:\Windows\System32\vcruntime140_1.dll')) {
@@ -67,15 +97,15 @@ function Start-PortablePostgres {
   }
   if (-not (Test-Path (Join-Path $data 'PG_VERSION'))) {
     Say "Initializing database cluster"
-    $pw = Join-Path $Tools 'pw.txt'
+    $pw = Join-Path $pgHome 'pw.txt'
     Set-Content -Path $pw -Value 'postgres' -NoNewline -Encoding ascii
-    & (Join-Path $bin 'initdb.exe') -D $data -U postgres -A scram-sha-256 --pwfile=$pw -E UTF8 | Out-Null
+    & (Join-Path $bin 'initdb.exe') -D $data -U postgres -A scram-sha-256 --pwfile=$pw -E UTF8 --locale=C | Out-Null
     Remove-Item $pw -Force
   }
   $status = & (Join-Path $bin 'pg_ctl.exe') -D $data status 2>&1
   if ($status -notmatch 'server is running') {
     Say "Starting PostgreSQL on port $PgPort"
-    & (Join-Path $bin 'pg_ctl.exe') -D $data -l (Join-Path $Tools 'pg.log') -o "-p $PgPort" -w start | Out-Null
+    & (Join-Path $bin 'pg_ctl.exe') -D $data -l (Join-Path $pgHome 'pg.log') -o "-p $PgPort" -w start | Out-Null
   }
   return "postgresql://postgres:postgres@localhost:$PgPort/$DbName"
 }
