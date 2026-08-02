@@ -90,7 +90,7 @@ Proof of work and the "how I verified" section — in [proof/PROOF.md](proof/PRO
 ## Task 3: the "surprise" review.csv
 `npm run load:reviews` loads the CSV as-is into the `reviews_raw` staging table, prints a short report, and merges into `companies` only valid **new** rows (broken values → `NULL`/`0`; duplicates and already-existing `id`s are skipped).
 
-Report highlights: 207 rows → 2 empty, 3 duplicate `id`s, **6 rows reference already-existing companies** (the dump is not "fresh"), plus broken `rating` / `reviews_count` / `site` / `phone`. Result: +196 new companies (994 → **1190**).
+Report highlights: 207 rows → 2 empty, 3 duplicate `id`s, **6 rows reference already-existing companies** (the dump is not "fresh"), broken `rating` / `reviews_count` / `site` / `phone`, plus messy text: inconsistent city spellings (`Moscow`, `москва`, a typo), **double-encoding corruption (mojibake)** in `name`/`city`, and a **column-shifted row**. All normalized against the canonical city/category set from the base data (`scripts/clean.mjs`). Result: +196 new companies (994 → **1190**).
 
 Full breakdown — in [ANOMALIES.md](ANOMALIES.md).
 
@@ -194,7 +194,7 @@ Next.js (App Router). Маршрут `/companies`: таблица компани
 ## Задача 3: review.csv «с сюрпризом»
 `npm run load:reviews` грузит CSV «как есть» в staging-таблицу `reviews_raw`, печатает короткий отчёт и мёржит в `companies` только валидные **новые** записи (битые значения → `NULL`/`0`, дубли и уже существующие `id` — пропускаются).
 
-Коротко: 207 строк → 2 пустые, 3 дубля `id`, **6 записей ссылаются на уже существующие компании** (выгрузка не «свежая»), плюс битые `rating` / `reviews_count` / `site` / `phone`. Итог: +196 новых компаний (994 → **1190**).
+Коротко: 207 строк → 2 пустые, 3 дубля `id`, **6 записей ссылаются на уже существующие компании** (выгрузка не «свежая»), битые `rating` / `reviews_count` / `site` / `phone`, а также грязный текст: разнобой в написании городов (`Moscow`, `москва`, опечатка), **битая кодировка (мохибейк)** в `name`/`city` и **строка со сдвигом колонок**. Всё нормализовано по эталонному набору городов/категорий из базовой выгрузки (`scripts/clean.mjs`). Итог: +196 новых компаний (994 → **1190**).
 
 Полный разбор — в [ANOMALIES.md](ANOMALIES.md).
 

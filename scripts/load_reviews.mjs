@@ -2,10 +2,53 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pool, DATA_DIR, REPO_ROOT } from './db.mjs';
 import { parseCSV } from './csv.mjs';
+import { makeCanonicalizer, maybeRepair } from './clean.mjs';
 
 const ID_RE = /^c_\d{6}$/;
 const PHONE_RE = /^\+7 \(\d{3}\) \d{3}-\d{2}-\d{2}$/;
 const SITE_RE = /^https?:\/\/[^\s]+\.[^\s]+$/;
+
+const CITY_ALIASES = {
+  'moscow': 'Москва',
+  'saint petersburg': 'Санкт-Петербург',
+  'saint-petersburg': 'Санкт-Петербург',
+  'sankt-peterburg': 'Санкт-Петербург',
+  'st petersburg': 'Санкт-Петербург',
+  'spb': 'Санкт-Петербург',
+};
+
+function canonicalSets() {
+  const cities = new Set(), cats = new Set();
+  for (const f of fs.readdirSync(DATA_DIR).filter(x => /^page_\d+\.json$/.test(x))) {
+    const j = JSON.parse(fs.readFileSync(path.join(DATA_DIR, f), 'utf8'));
+    for (const it of j.items) { if (it.city) cities.add(it.city); if (it.category) cats.add(it.category); }
+  }
+  return { cities: [...cities], cats: [...cats] };
+}
+
+const { cities: CITIES, cats: CATS } = canonicalSets();
+const cityCanon = makeCanonicalizer(CITIES, CITY_ALIASES);
+const catCanon = makeCanonicalizer(CATS);
+const cityFromCat = makeCanonicalizer(CITIES);
+
+function cleanRow(r) {
+  const name = maybeRepair(r.name.trim());
+  let category = catCanon(r.category);
+  let city = cityCanon(r.city);
+  let address = r.address.trim() || null;
+  const notes = [];
+  if (name !== r.name.trim()) notes.push('name-encoding');
+  if (city === null && cityFromCat(r.category) !== null) {
+    city = cityFromCat(r.category);
+    address = r.address.trim() ? r.address.trim() : (r.city.trim() || null);
+    category = null;
+    notes.push('column-shift');
+  } else {
+    if (r.city.trim() && city !== r.city.trim()) notes.push(city ? 'city-normalized' : 'city-dropped');
+    if (r.category.trim() && category !== r.category.trim()) notes.push(category ? 'category-normalized' : 'category-dropped');
+  }
+  return { name, category, city, address, notes };
+}
 
 function parseRating(v) {
   if (v == null || v.trim() === '') return { ok: true, value: null };
@@ -55,7 +98,7 @@ async function main() {
     }
     await client.query('COMMIT');
 
-    const { rows: baseRows } = await client.query('SELECT id FROM companies');
+    const { rows: baseRows } = await client.query("SELECT id FROM companies WHERE source = 'api_pages'");
     const baseIds = new Set(baseRows.map(r => r.id));
 
     const nonEmpty = recs.filter(r => Object.values(r).some((v, i) => i > 0 && String(v).trim() !== ''));
@@ -70,7 +113,12 @@ async function main() {
     const reviewsBad = nonEmpty.filter(r => !parseReviews(r.reviews_count).ok);
     const phoneBad = nonEmpty.filter(r => r.phone.trim() !== '' && !PHONE_RE.test(r.phone.trim()));
     const siteBad = nonEmpty.filter(r => r.site.trim() !== '' && !SITE_RE.test(r.site.trim()));
-    const wsRows = nonEmpty.filter(r => Object.entries(r).some(([k, v]) => k !== 'line_no' && typeof v === 'string' && v !== v.trim()));
+
+    const cleaned = nonEmpty.map(r => ({ r, c: cleanRow(r) }));
+    const cityFixed = cleaned.filter(x => x.c.notes.includes('city-normalized'));
+    const catFixed = cleaned.filter(x => x.c.notes.includes('category-normalized') || x.c.notes.includes('category-dropped'));
+    const nameFixed = cleaned.filter(x => x.c.notes.includes('name-encoding'));
+    const shifted = cleaned.filter(x => x.c.notes.includes('column-shift'));
 
     const rpt = [];
     rpt.push('════════════════ ОТЧЁТ ПО review.csv ════════════════');
@@ -86,7 +134,10 @@ async function main() {
     rpt.push(`reviews_count не целое/отриц.:    ${reviewsBad.length}  [${reviewsBad.map(r => `${r.id}:"${r.reviews_count}"`).join(', ')}]`);
     rpt.push(`phone не по маске:                ${phoneBad.length}  [${phoneBad.map(r => `${r.id}:"${r.phone}"`).join(', ')}]`);
     rpt.push(`site не валидный URL:             ${siteBad.length}  [${siteBad.map(r => `${r.id}:"${r.site}"`).join(', ')}]`);
-    rpt.push(`лишние пробелы в значениях:       ${wsRows.length}  [${wsRows.map(r => r.id).join(', ')}]`);
+    rpt.push('--- нормализация текстовых полей ---');
+    rpt.push(`city приведён к эталону:          ${cityFixed.length}  [${cityFixed.map(x => `${x.r.id}:"${x.r.city}"→"${x.c.city}"`).join(', ')}]`);
+    rpt.push(`битая кодировка (мохибейк):       ${nameFixed.length}  [${nameFixed.map(x => x.r.id).join(', ')}]`);
+    rpt.push(`сдвиг колонок (нет category):     ${shifted.length}  [${shifted.map(x => x.r.id).join(', ')}]`);
     rpt.push('═════════════════════════════════════════════════════');
     console.log(rpt.join('\n'));
 
@@ -99,18 +150,23 @@ async function main() {
       if (seen.has(r.id)) { skippedDup++; continue; }
       seen.add(r.id);
 
+      const c = cleanRow(r);
       const rt = parseRating(r.rating);
       const rc = parseReviews(r.reviews_count);
       const phone = PHONE_RE.test(r.phone.trim()) ? r.phone.trim() : null;
       const site = SITE_RE.test(r.site.trim()) ? r.site.trim() : null;
-      if (!rt.ok || !rc.ok || (r.phone.trim() && !phone) || (r.site.trim() && !site)) cleanedFields++;
+      if (!rt.ok || !rc.ok || (r.phone.trim() && !phone) || (r.site.trim() && !site) || c.notes.length) cleanedFields++;
 
       await client.query(
         `INSERT INTO companies (id,name,category,city,address,rating,reviews_count,site,phone,source)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'review_csv')
-         ON CONFLICT (id) DO NOTHING`,
-        [r.id, r.name.trim(), r.category.trim() || null, r.city.trim() || null,
-         r.address.trim() || null, rt.value, rc.value ?? 0, site, phone]
+         ON CONFLICT (id) DO UPDATE SET
+           name = EXCLUDED.name, category = EXCLUDED.category, city = EXCLUDED.city,
+           address = EXCLUDED.address, rating = EXCLUDED.rating,
+           reviews_count = EXCLUDED.reviews_count, site = EXCLUDED.site,
+           phone = EXCLUDED.phone, updated_at = now()
+         WHERE companies.source = 'review_csv'`,
+        [r.id, c.name, c.category, c.city, c.address, rt.value, rc.value ?? 0, site, phone]
       );
       merged++;
     }
@@ -118,7 +174,7 @@ async function main() {
 
     console.log('\n──────────── МЁРЖ в companies ────────────');
     console.log(`Добавлено новых компаний:        ${merged}`);
-    console.log(`  из них с очищенными полями:     ${cleanedFields} (битые значения → NULL)`);
+    console.log(`  из них с очищенными полями:     ${cleanedFields}`);
     console.log(`Пропущено (уже в базе):          ${skippedExisting}`);
     console.log(`Пропущено (битый id):            ${skippedBadId}`);
     console.log(`Пропущено (дубль id в файле):    ${skippedDup}`);
