@@ -1,0 +1,22 @@
+# секреты
+.env
+web/.env
+web/.env.local
+
+# зависимости
+node_modules/
+web/node_modules/
+
+# сборка Next.js
+web/.next/
+web/out/
+web/next-env.d.ts
+
+# исходный архив (данные уже распакованы в data_pack/)
+data_pack.zip
+
+# логи, временное
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

@@ -1,0 +1,14 @@
+{
+  "name": "polza-data-pack",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Загрузка выгрузки компаний в PostgreSQL + анализ review.csv (тестовое задание Polza Agency)",
+  "scripts": {
+    "load:companies": "node scripts/load_companies.mjs",
+    "load:reviews": "node scripts/load_reviews.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}
