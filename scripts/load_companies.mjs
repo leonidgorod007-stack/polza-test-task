@@ -1,16 +1,3 @@
-// ============================================================
-//  Задача 1: выгрузка (page_*.json) → PostgreSQL
-//
-//  Что делает скрипт:
-//   1. применяет db/schema.sql (idempotent);
-//   2. читает все page_001.json … page_020.json;
-//   3. собирает все items со всех страниц;
-//   4. грузит в таблицу companies батчами с дедупликацией по id
-//      (ON CONFLICT (id) DO UPDATE) — повторный запуск безопасен;
-//   5. печатает короткий отчёт (сколько прочитано / уникальных / загружено).
-//
-//  Запуск:  npm run load:companies
-// ============================================================
 import fs from 'node:fs';
 import path from 'node:path';
 import { pool, DATA_DIR, REPO_ROOT } from './db.mjs';
@@ -18,11 +5,9 @@ import { pool, DATA_DIR, REPO_ROOT } from './db.mjs';
 async function main() {
   const client = await pool.connect();
   try {
-    // 1. Схема
     const schema = fs.readFileSync(path.join(REPO_ROOT, 'db', 'schema.sql'), 'utf8');
     await client.query(schema);
 
-    // 2–3. Читаем все страницы
     const files = fs.readdirSync(DATA_DIR)
       .filter(f => /^page_\d+\.json$/.test(f))
       .sort();
@@ -38,14 +23,11 @@ async function main() {
     console.log(`Прочитано страниц: ${files.length}`);
     console.log(`Собрано записей (с дублями): ${items.length}  (поле total в API = ${declaredTotal})`);
 
-    // Дедупликация на стороне скрипта по id (в выгрузке есть повторяющиеся id).
     const byId = new Map();
-    for (const it of items) byId.set(it.id, it);          // последняя запись побеждает
+    for (const it of items) byId.set(it.id, it);
     const unique = [...byId.values()];
     console.log(`Уникальных id: ${unique.length}  (дублей отброшено: ${items.length - unique.length})`);
 
-    // 4. Загрузка батчами внутри транзакции.
-    //    ON CONFLICT (id) DO UPDATE → повторный запуск идемпотентен.
     await client.query('BEGIN');
     const BATCH = 200;
     let loaded = 0;
@@ -56,13 +38,12 @@ async function main() {
     }
     await client.query('COMMIT');
 
-    // 5. Отчёт
     const { rows } = await client.query('SELECT count(*)::int AS n FROM companies');
-    console.log(`\n✅ Загружено/обновлено записей: ${loaded}`);
-    console.log(`   Всего в таблице companies: ${rows[0].n}`);
+    console.log(`\nЗагружено/обновлено записей: ${loaded}`);
+    console.log(`Всего в таблице companies: ${rows[0].n}`);
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
-    console.error('❌ Ошибка загрузки:', e.message);
+    console.error('Ошибка загрузки:', e.message);
     process.exitCode = 1;
   } finally {
     client.release();
@@ -70,7 +51,6 @@ async function main() {
   }
 }
 
-// rating в выгрузке — число или null; ограничиваем 0..5 на всякий случай.
 function normalizeRating(r) {
   if (r === null || r === undefined) return null;
   const n = Number(r);
@@ -78,7 +58,6 @@ function normalizeRating(r) {
   return n;
 }
 
-// Строим один INSERT ... VALUES для батча.
 function buildInsert(chunk) {
   const values = chunk.map((_, j) => {
     const b = j * 9;

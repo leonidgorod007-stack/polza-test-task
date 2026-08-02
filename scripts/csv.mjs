@@ -1,9 +1,7 @@
-// Минимальный CSV-парсер (RFC 4180): кавычки, экранированные "", запятые
-// и переносы строк внутри кавычек. Без внешних зависимостей.
 export function parseCSV(text) {
   const rows = [];
   let field = '', row = [], inQuotes = false, i = 0;
-  text = text.replace(/^﻿/, ''); // срезаем BOM, если есть
+  text = text.replace(/^﻿/, '');
   while (i < text.length) {
     const c = text[i];
     if (inQuotes) {

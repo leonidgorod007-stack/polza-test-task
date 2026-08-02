@@ -7,6 +7,12 @@ web/.env.local
 node_modules/
 web/node_modules/
 
+# портативные инструменты, которые скачивает run.bat / setup.ps1
+.tools/
+
+# личные ответы задачи 4 (сдаются отдельным файлом, не в репозиторий)
+TASK4*
+
 # сборка Next.js
 web/.next/
 web/out/

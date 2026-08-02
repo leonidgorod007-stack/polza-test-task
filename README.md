@@ -31,6 +31,8 @@ Load a company dataset into PostgreSQL, run 3 analytical SQL queries, build a `/
 
 ## Quick start
 
+**Windows, one click:** double-click **`run.bat`**. It auto-provisions Node (if missing), brings up PostgreSQL (an already-running one, or Docker, or a portable build it downloads), writes `.env`, loads the data, and opens `http://localhost:3000/companies`. The manual steps below are for other OSes / full control.
+
 **1. Start PostgreSQL** (Docker recommended):
 ```bash
 docker compose up -d          # Postgres 17 on localhost:5432, database "polza"
@@ -132,6 +134,8 @@ The loader scripts are plain Node.js (single dependency — `pg`), the CSV parse
 - PostgreSQL 14+ (проще всего через Docker — см. ниже) либо бесплатный Supabase
 
 ## Быстрый старт
+
+**Windows, в один клик:** запусти **`run.bat`**. Он сам поставит Node (если нет), поднимет PostgreSQL (уже запущенный / через Docker / портативный, который скачает), запишет `.env`, загрузит данные и откроет `http://localhost:3000/companies`. Ручные шаги ниже — для других ОС или полного контроля.
 
 **1. Поднять PostgreSQL** (Docker рекомендуется):
 ```bash

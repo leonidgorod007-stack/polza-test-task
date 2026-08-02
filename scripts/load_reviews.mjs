@@ -1,17 +1,3 @@
-// ============================================================
-//  Задача 3: review.csv → PostgreSQL + отчёт по данным
-//
-//  Стратегия:
-//   1. Грузим CSV "как есть" в staging-таблицу reviews_raw (все колонки TEXT),
-//      чтобы битые значения не рушили импорт.
-//   2. Считаем короткий отчёт по данным и перечень аномалий
-//      (то же, что зафиксировано в ANOMALIES.md).
-//   3. Аккуратно мёржим в companies только валидные НОВЫЕ записи
-//      (валидный id, которого ещё нет в базе), с чисткой полей.
-//      Всё сомнительное — пропускаем и объясняем почему.
-//
-//  Запуск:  npm run load:reviews
-// ============================================================
 import fs from 'node:fs';
 import path from 'node:path';
 import { pool, DATA_DIR, REPO_ROOT } from './db.mjs';
@@ -23,7 +9,7 @@ const SITE_RE = /^https?:\/\/[^\s]+\.[^\s]+$/;
 
 function parseRating(v) {
   if (v == null || v.trim() === '') return { ok: true, value: null };
-  const t = v.trim().replace(',', '.');          // "4,5" → "4.5"
+  const t = v.trim().replace(',', '.');
   if (!/^-?\d+(\.\d+)?$/.test(t)) return { ok: false, value: null };
   const n = Number(t);
   if (n < 0 || n > 5) return { ok: false, value: null };
@@ -32,7 +18,7 @@ function parseRating(v) {
 function parseReviews(v) {
   if (v == null || v.trim() === '') return { ok: true, value: 0 };
   const t = v.trim();
-  if (!/^-?\d+$/.test(t)) return { ok: false, value: null }; // "45.5", "много"
+  if (!/^-?\d+$/.test(t)) return { ok: false, value: null };
   const n = parseInt(t, 10);
   if (n < 0) return { ok: false, value: null };
   return { ok: true, value: n };
@@ -43,7 +29,6 @@ async function main() {
   try {
     await client.query(fs.readFileSync(path.join(REPO_ROOT, 'db', 'schema.sql'), 'utf8'));
 
-    // 1. Загрузка сырья в reviews_raw
     const raw = fs.readFileSync(path.join(DATA_DIR, 'review.csv'), 'utf8');
     const rows = parseCSV(raw);
     const header = rows[0].map(h => h.trim());
@@ -56,7 +41,7 @@ async function main() {
     for (let i = 0; i < dataRows.length; i++) {
       const r = dataRows[i];
       const rec = {
-        line_no: i + 2, // +1 за 0-индекс, +1 за строку заголовка
+        line_no: i + 2,
         id: r[col.id] ?? '', name: r[col.name] ?? '', category: r[col.category] ?? '',
         city: r[col.city] ?? '', address: r[col.address] ?? '', rating: r[col.rating] ?? '',
         reviews_count: r[col.reviews_count] ?? '', site: r[col.site] ?? '', phone: r[col.phone] ?? '',
@@ -70,7 +55,6 @@ async function main() {
     }
     await client.query('COMMIT');
 
-    // 2. Отчёт по данным
     const { rows: baseRows } = await client.query('SELECT id FROM companies');
     const baseIds = new Set(baseRows.map(r => r.id));
 
@@ -106,10 +90,6 @@ async function main() {
     rpt.push('═════════════════════════════════════════════════════');
     console.log(rpt.join('\n'));
 
-    // 3. Мёрж валидных НОВЫХ записей в companies
-    //    Правила: валидный id, которого нет в базе, не пустой, не дубль внутри файла;
-    //    битые rating/reviews_count/site/phone → NULL (запись всё равно грузим,
-    //    но с очищенными полями). Дубли внутри файла берём один раз.
     await client.query('BEGIN');
     const seen = new Set();
     let merged = 0, skippedExisting = 0, skippedBadId = 0, skippedDup = 0, cleanedFields = 0;
@@ -121,7 +101,6 @@ async function main() {
 
       const rt = parseRating(r.rating);
       const rc = parseReviews(r.reviews_count);
-      // Невалидные телефон/сайт превращаем в NULL (в базе не место "нет сайта" или "8 (925) abc-...").
       const phone = PHONE_RE.test(r.phone.trim()) ? r.phone.trim() : null;
       const site = SITE_RE.test(r.site.trim()) ? r.site.trim() : null;
       if (!rt.ok || !rc.ok || (r.phone.trim() && !phone) || (r.site.trim() && !site)) cleanedFields++;
@@ -148,7 +127,7 @@ async function main() {
     console.log('\nПодробности аномалий — в ANOMALIES.md');
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
-    console.error('❌ Ошибка:', e.message);
+    console.error('Ошибка:', e.message);
     process.exitCode = 1;
   } finally {
     client.release();

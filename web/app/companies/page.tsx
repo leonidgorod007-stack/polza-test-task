@@ -1,7 +1,5 @@
 import { pool } from '@/lib/db';
 
-// Страница читает данные серверно при каждом запросе (без кэша),
-// потому что результат зависит от строки поиска и фильтра.
 export const dynamic = 'force-dynamic';
 
 type Company = {
@@ -10,7 +8,7 @@ type Company = {
   category: string | null;
   city: string | null;
   address: string | null;
-  rating: string | null;        // NUMERIC приходит из pg строкой
+  rating: string | null;
   reviews_count: number;
   site: string | null;
   phone: string | null;
@@ -26,7 +24,6 @@ async function getCities(): Promise<string[]> {
 }
 
 async function getCompanies(q: string, city: string) {
-  // Параметризованный запрос — защита от SQL-инъекций.
   const where: string[] = [];
   const params: unknown[] = [];
   if (q) {
@@ -74,7 +71,6 @@ export default async function CompaniesPage({
       <h1>Компании</h1>
       <p className="subtitle">Данные из PostgreSQL · серверный рендеринг</p>
 
-      {/* GET-форма: параметры уходят в URL (?q=&city=), удобно шарить ссылку */}
       <form className="filters" method="get">
         <div className="field">
           <label htmlFor="q">Поиск по названию</label>
